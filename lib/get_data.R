@@ -10,24 +10,25 @@ get_continuing_df <- function(
   type_code_limit = ifelse( benzo, 10, 9 )
   query  <-  paste0( "
                     SELECT pin, gender, age, state, lga, item_code, type_code, generic_name  ,
-                    type_name, supply_date, quantity, unit_wt, ddd_mg_factor 
+                    type_name, supply_date, quantity, unit_wt, ddd_mg_factor, ome_mg_factor 
                     FROM continuing." , base_table , " r 
-                    JOIN continuing.item i USING (item_code) 
+                    JOIN continuing.item_ome i USING (item_code) 
                     JOIN public.generictype USING (type_code)
                     WHERE (EXTRACT( YEAR FROM supply_date ) != '2017') ",
                     ifelse( benzo, '', " AND (type_code <> 10)") 
                     )
 
   my_db_get_query( query ) %>%
-    as.tibble() %>%
-    mutate( n_dose = (unit_wt * quantity / ddd_mg_factor ),
+    mutate( 
+           n_dose = (unit_wt * quantity / ddd_mg_factor ),
+           n_dose_ome = (unit_wt * quantity / ome_mg_factor ),
            agen=ifelse( age=='100+', 101, suppressWarnings( as.numeric( age ))),
            age = cut( agen, 
                      c(0,19,44,64,9999), 
                      labels=qw("0-19 20-44 45-64 65+")
                      )
            ) %>%
-    select( -unit_wt, -quantity, -ddd_mg_factor, -agen, -item_code) %>% 
+    select( -agen, -item_code) %>% 
     rename(sex=gender) 
 }
 
@@ -42,8 +43,7 @@ get_drugs <- function( ) {
     JOIN public.generictype USING (type_code)"
       )
 
-  my_db_get_query( query ) %>%
-    as.tibble() 
+  my_db_get_query( query ) 
 }
 
 # -------------------------------------------------
@@ -59,12 +59,16 @@ get_usage_df <- function( ) {
           "
           , sep = ""
       )
-  my_db_get_query( query ) %>%
-    # TODO mutate  - map ". " LGA to appropriate state 99 LGA
-    as.tibble() %>%
+  my_db_get_query( query )
   return( . )
 }
 
+
+# -------------------------------------------------
+my_dbReadTable <- function ( table_name ) {
+  my_db_get_query( paste0( 'select * from ', table_name))
+}
+# -------------------------------------------------
 
 # -------------------------------------------------
 my_dbWriteTable <- function ( df, table_name ) {
@@ -74,7 +78,7 @@ my_dbWriteTable <- function ( df, table_name ) {
           host = "localhost", port = 5432,
           user = "dewoller", password = Sys.getenv('PASSWD'))
   on.exit(dbDisconnect(con))
-  dbWriteTable( con, table_name, df )
+  dbWriteTable( con, table_name, df, overwrite=TRUE )
 }
 # -------------------------------------------------
 
@@ -87,7 +91,8 @@ my_db_get_query <- function ( query ) {
           host = "localhost", port = 5432,
           user = "dewoller", password = Sys.getenv("PASSWD") )
   on.exit(dbDisconnect(con))
-  dbGetQuery( con, query )
+  print(query)
+  dbGetQuery( con, query ) %>% as_tibble()
 
 }
 # -------------------------------------------------
@@ -104,8 +109,7 @@ get_lga_size_df<- function ( state_id ) {
         )
   df_size <- my_db_get_query( query ) %>%
     mutate_at( c(  "lga" ), funs( factor(.) ) ) %>%
-    ungroup() %>%
-    as.tibble()
+    ungroup()
   return( df_size )
 }
 
@@ -153,8 +157,7 @@ get_population_df<- function ( state_id = 0 ) {
   df_population <- my_db_get_query( query ) %>%
     left_join( df_seifa, by = "lga") %>%
     mutate( state = get_state_code_from_lga( lga ) ) %>%
-    ungroup() %>%
-    as.tibble()
+    ungroup() 
   return( df_population )
 }
 
@@ -218,7 +221,6 @@ get_seifa_df <- function( state_id ) {
                            )
 
   df_seifa <- my_db_get_query( seifa_query ) %>%
-    as.tibble() %>%
     rename(irsd_score_raw = score ) %>%
     mutate(
            seifa  = 
@@ -280,8 +282,7 @@ get_state_geo_df <- function( state_id ) {
               , state_br_lat = min( state_br_lat )
               , state_br_lon = min( state_br_lon )
               ) %>%
-  mutate_at( c( "state_id", "capital"), funs( factor(.) ) ) %>%
-  as.tibble() %>%
+  mutate_at( c( "state_id", "capital"), funs( factor(.) ) )
   return( . )
 }
 
