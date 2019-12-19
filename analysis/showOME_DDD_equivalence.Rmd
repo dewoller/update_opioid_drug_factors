@@ -1,0 +1,132 @@
+
+---
+title: "OME Ashton DDD comparision"
+author:  "Mofi Islam and Dennis Wollersheim "
+date: "2019-12-19"
+output:
+workflowr::wflow_html:
+toc: false
+---
+
+```{r pre_initial, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+
+rm(list=ls())
+options(width = 200)
+show_code = FALSE
+#pts_chunk$set(echo = FALSE)
+
+```
+
+
+```{r initial, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+
+
+source('lib/functions.R')
+source('lib/get_data.R')
+library(kableExtra)
+library(readxl)
+
+
+ 
+source('lib/functions.R')
+source('lib/get_data.R')
+
+library(readxl)
+
+df_oral=tibble( pbs_route=c('TABLET','ORAL LIQUID or SACH', 'LOZENGE','CAPSULE','SACHET'))
+
+my_dbReadTable('continuing.item') %>%
+  mutate( drug = str_replace( generic_name, ' .*','')) %>% 
+  { . } -> df_item 
+
+df_item %>% 
+  filter( type_code != 10 ) %>%
+  arrange(drug) %>%
+  { . } -> df_item_ome
+
+read_excel( 'data/OME_input.xls') %>% 
+  { . } ->    df_ome 
+
+df_ome %>%
+  filter( pbs_route=="ORAL") %>%
+  select( -pbs_route ) %>%
+  crossing( df_oral ) %>%
+  bind_rows( df_ome  %>% filter( pbs_route!="ORAL") ) %>% 
+  { . } -> df_ome_enhanced
+
+df_item_ome %>% 
+  left_join( df_ome_enhanced %>% select( type_code, pbs_route, ome_mg_factor), by=c('type_code', 'pbs_route')) %>% 
+  mutate(ashton_mg_factor = NA) %>%
+  { . } -> df_item_ome_final
+
+
+################################################################################
+# Ashton
+################################################################################
+
+read_csv( 'data/ashton_input.csv') %>% 
+  janitor::clean_names() %>%
+  { . } ->    df_ashton_input
+
+df_item %>% 
+  filter( type_code == 10 ) %>%
+  arrange(drug) %>%
+  { . } -> df_item_ashton 
+
+# error check, makes sure we get everything
+df_item_ashton %>%
+  anti_join( df_ashton_input)
+
+df_item_ashton %>%
+  inner_join( df_ashton_input) %>% 
+  mutate(ome_mg_factor = NA) %>%
+  { . } -> df_item_ashton
+
+
+
+
+
+```
+
+# DDD OME equivalence testing
+
+OME does not correspond with DDD.  It acts much closer to the inverse of DDD.  Below is a table, demonstating that.  For each drug and route combination, the ddd:ome ratio is much more variable, where as the ddd:(1/ome) ratio is much more consistent
+
+```{r check_ome, echo=FALSE}
+
+df_item_ome %>% 
+  left_join( df_ome_enhanced %>% select( type_code, pbs_route, ome_mg_factor), by=c('type_code', 'pbs_route')) %>%
+  filter( !is.na(ome_mg_factor )) %>%
+  mutate( pbs_route = ifelse( pbs_route %in% df_oral$pbs_route, 'ORAL', pbs_route)) %>%
+  distinct( drug, pbs_route, ddd_mg_factor, ome_mg_factor ) %>%
+  mutate( inverse_ome_mg_factor = 1/ome_mg_factor,
+         ddd_ome_ratio = ddd_mg_factor / ome_mg_factor,
+         ddd_inverse_ome_ratio = ddd_mg_factor / inverse_ome_mg_factor
+         )  %>% 
+  set_names( ~ str_replace( ., '_mg_factor', '')) %>%
+  mutate_if(is.numeric, round,2) %>%
+  kable(padding=30) %>%
+  kableExtra::kable_styling()
+
+```
+
+
+# DDD Ashton equivalence testing
+
+On the other hand, the ashton factor /does/ act more like ddd. Below is a table showing, for each drug and route combination, the ddd:ashton ratio, and the ddd:inverse ashton ratio.  The ddd:ashton ratio is consistent, implying that it should be in the denominator
+
+
+```{r check_ashton, echo=FALSE}
+
+df_item_ashton %>%
+  distinct( drug, ashton_mg_factor, ddd_mg_factor) %>%
+  mutate( inverse_ashton_mg_factor = 1/ashton_mg_factor,
+        ddd_ashton_ratio = ddd_mg_factor / ashton_mg_factor,
+        ddd_inverse_ashton_ratio = ddd_mg_factor / inverse_ashton_mg_factor ) %>% 
+  set_names( ~ str_replace( ., '_mg_factor', '')) %>%
+  mutate_if(is.numeric, round,2) %>%
+  kable(padding=10L, digits=2) %>%
+  kableExtra::kable_styling()
+
+
+```
